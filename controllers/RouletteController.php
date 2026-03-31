@@ -103,12 +103,48 @@ class RouletteController {
                 exit;
             }
             
-            // Tirage au sort sécurisé
-            $randomIndex = random_int(0, count($availableStudents) - 1);
-            $drawnStudent = $availableStudents[$randomIndex];
-            
-            // Stocker seulement l'ID de l'étudiant au lieu de l'objet complet
-            $_SESSION['drawn_student_id'] = $drawnStudent->getId();
+            // Tirage au sort (simple ou groupe)
+            if (isset($_POST['group_draw']) && $_POST['group_draw'] === '1' && isset($_POST['group_size'])) {
+                $groupSize = (int)$_POST['group_size'];
+                $availableCount = count($availableStudents);
+                
+                // Sécurité: vérifier que la taille du groupe est valide
+                if ($groupSize < 1 || $groupSize > $availableCount) {
+                    $groupSize = min(1, $availableCount);
+                }
+                
+                if ($groupSize > 1) {
+                    // Tirer le groupe
+                    $keys = array_rand($availableStudents, $groupSize);
+                    if (!is_array($keys)) {
+                        $keys = [$keys];
+                    }
+                    
+                    $drawnIds = [];
+                    foreach ($keys as $key) {
+                        $drawnIds[] = $availableStudents[$key]->getId();
+                    }
+                    
+                    $_SESSION['group_draw_ids'] = $drawnIds;
+                    $_SESSION['group_draw_total'] = count($drawnIds);
+                    $_SESSION['group_draw_current'] = 1;
+                    
+                    // Mettre le premier ID comme étudiant en cours
+                    $_SESSION['drawn_student_id'] = array_shift($_SESSION['group_draw_ids']);
+                    $drawnStudent = $this->StudentR->getStudentById($_SESSION['drawn_student_id']);
+                } else {
+                    $randomIndex = random_int(0, count($availableStudents) - 1);
+                    $drawnStudent = $availableStudents[$randomIndex];
+                    $_SESSION['drawn_student_id'] = $drawnStudent->getId();
+                    unset($_SESSION['group_draw_ids'], $_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
+                }
+            } else {
+                // Tirage simple
+                $randomIndex = random_int(0, count($availableStudents) - 1);
+                $drawnStudent = $availableStudents[$randomIndex];
+                $_SESSION['drawn_student_id'] = $drawnStudent->getId();
+                unset($_SESSION['group_draw_ids'], $_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
+            }
             
             // Passer l'étudiant à la vue
             $student = $drawnStudent;
@@ -172,6 +208,16 @@ class RouletteController {
             $_SESSION['message'] = "Note attribuée à " . $student->getFullName() . " : " . number_format($note, 1) . "/20";
             unset($_SESSION['drawn_student_id']);
             
+            // Si on est en tirage de groupe et qu'il reste des élèves
+            if (!empty($_SESSION['group_draw_ids'])) {
+                $_SESSION['group_draw_current']++;
+                header('Location: index.php?action=continueGroupDraw');
+                exit;
+            }
+            
+            // Sinon on a fini ou c'était un tirage simple
+            unset($_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
+            
             header('Location: index.php');
             exit;
         } catch (Exception $e) {
@@ -208,10 +254,49 @@ class RouletteController {
             $_SESSION['message'] = $student->getFullName() . " a été passé sans note.";
             unset($_SESSION['drawn_student_id']);
             
+            // Si on est en tirage de groupe et qu'il reste des élèves
+            if (!empty($_SESSION['group_draw_ids'])) {
+                $_SESSION['group_draw_current']++;
+                header('Location: index.php?action=continueGroupDraw');
+                exit;
+            }
+            
+            // Sinon on a fini ou c'était un tirage simple
+            unset($_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
+            
             header('Location: index.php');
             exit;
         } catch (Exception $e) {
             $_SESSION['error'] = "Erreur lors du passage de l'étudiant : " . $e->getMessage();
+            header('Location: index.php');
+            exit;
+        }
+    }
+    
+    /**
+     * Continue le tirage au sort d'un groupe d'étudiants
+     */
+    public function continueGroupDraw() {
+        if (!isset($_SESSION['group_draw_ids']) || empty($_SESSION['group_draw_ids'])) {
+            $_SESSION['error'] = "Aucun tirage de groupe en cours.";
+            header('Location: index.php');
+            exit;
+        }
+        
+        // Prendre le prochain étudiant dans la liste
+        $_SESSION['drawn_student_id'] = array_shift($_SESSION['group_draw_ids']);
+        
+        try {
+            if (file_exists('views/note_view.php')) {
+                require_once 'views/note_view.php';
+            } else if (file_exists('note_view.php')) {
+                require_once 'note_view.php';
+            } else {
+                $student = $this->StudentR->getStudentById($_SESSION['drawn_student_id']);
+                $this->renderNoteView($student);
+            }
+        } catch (Exception $e) {
+            $_SESSION['error'] = "Erreur lors de la suite du tirage : " . $e->getMessage();
             header('Location: index.php');
             exit;
         }

@@ -272,6 +272,11 @@ if (!isset($student) || !$student) {
         
         <div class="content">
             <div class="drawn-student">
+                <?php if (isset($_SESSION['group_draw_total']) && $_SESSION['group_draw_total'] > 1): ?>
+                    <div style="background: rgba(255,255,255,0.2); display: inline-block; padding: 5px 15px; border-radius: 20px; font-weight: bold; margin-bottom: 10px;">
+                        👥 Tirage de groupe : <?= $_SESSION['group_draw_current'] ?> / <?= $_SESSION['group_draw_total'] ?>
+                    </div>
+                <?php endif; ?>
                 <h2>Étudiant tiré au sort</h2>
                 <h1><?= htmlspecialchars($student->getFullName()) ?></h1>
             </div>

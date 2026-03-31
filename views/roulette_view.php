@@ -212,6 +212,60 @@
                 padding: 15px 30px;
             }
         }
+        
+        /* Modal Styles */
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 1000; 
+            left: 0;
+            top: 0;
+            width: 100%; 
+            height: 100%; 
+            background-color: rgba(0,0,0,0.5); 
+            backdrop-filter: blur(5px);
+        }
+        
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 30px;
+            border-radius: 15px;
+            width: 80%;
+            max-width: 500px;
+            box-shadow: 0 5px 30px rgba(0,0,0,0.3);
+            text-align: center;
+            position: relative;
+        }
+        
+        .close {
+            color: #aaa;
+            position: absolute;
+            top: 15px;
+            right: 25px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            color: #333;
+        }
+        
+        .form-group label {
+            font-size: 1.1em;
+            color: #333;
+            cursor: pointer;
+        }
+        
+        input[type="checkbox"] {
+            transform: scale(1.5);
+            margin-right: 10px;
+        }
+        
+        input[type="number"] {
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -259,11 +313,9 @@
                     <p>Étudiants restants: <strong><?= count($availableStudents) ?></strong></p>
                     
                     <?php if (count($availableStudents) > 0): ?>
-                        <form method="post" action="index.php?action=drawStudent">
-                            <button type="submit" class="draw-button">
-                                🎲 Tirer au sort !
-                            </button>
-                        </form>
+                        <button type="button" class="draw-button" onclick="openDrawModal()">
+                            🎲 Tirer au sort !
+                        </button>
                     <?php else: ?>
                         <p style="font-size: 1.2em; margin-top: 20px;">
                             ✅ Tous les étudiants sont passés !
@@ -325,6 +377,30 @@
                     </button>
                 </div>
             <?php endif; ?>
+    </div>
+
+    <!-- Modal Tirage -->
+    <div id="drawModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeDrawModal()">&times;</span>
+            <h2>Options de Tirage</h2>
+            <form method="post" action="index.php?action=drawStudent" id="drawForm">
+                <div class="form-group" style="text-align: left; margin: 20px 0;">
+                    <label>
+                        <input type="checkbox" name="group_draw" id="groupDrawCheckbox" value="1" onchange="toggleGroupSize()">
+                        Tirage en groupe
+                    </label>
+                </div>
+                
+                <div class="form-group" id="groupSizeContainer" style="display: none; text-align: left; margin: 20px 0;">
+                    <label for="group_size">Nombre d'étudiants (max <?= count($availableStudents) ?? 0 ?>) :</label>
+                    <input type="number" name="group_size" id="group_size" class="form-control" min="2" max="<?= count($availableStudents) ?? 0 ?>" value="2" style="width: 100%;">
+                </div>
+                
+                <button type="submit" class="btn btn-primary" style="width: 100%; font-size: 1.2em; padding: 15px;">
+                    🎯 Lancer le tirage
+                </button>
+            </form>
         </div>
     </div>
 
@@ -353,6 +429,32 @@
                 }, index * 100);
             });
         });
+
+        function openDrawModal() {
+            document.getElementById('drawModal').style.display = 'block';
+        }
+        
+        function closeDrawModal() {
+            document.getElementById('drawModal').style.display = 'none';
+        }
+        
+        function toggleGroupSize() {
+            const checkbox = document.getElementById('groupDrawCheckbox');
+            const container = document.getElementById('groupSizeContainer');
+            if (checkbox.checked) {
+                container.style.display = 'block';
+                document.getElementById('group_size').focus();
+            } else {
+                container.style.display = 'none';
+            }
+        }
+        
+        window.onclick = function(event) {
+            const modal = document.getElementById('drawModal');
+            if (event.target == modal) {
+                closeDrawModal();
+            }
+        };
     </script>
 </body>
 </html>

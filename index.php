@@ -54,7 +54,7 @@ try {
 
     // Router simple avec validation
     $action = $_GET['action'] ?? 'index';
-    $allowed_actions = ['index', 'selectClass', 'drawStudent', 'assignNote', 'skipStudent', 'resetPassages', 'resetAll'];
+    $allowed_actions = ['index', 'selectClass', 'drawStudent', 'assignNote', 'skipStudent', 'resetPassages', 'resetAll', 'continueGroupDraw'];
     
     if (!in_array($action, $allowed_actions)) {
         $action = 'index';
@@ -78,6 +78,9 @@ try {
             break;
         case 'resetAll':
             $controller->resetAll();
+            break;
+        case 'continueGroupDraw':
+            $controller->continueGroupDraw();
             break;
         default:
             $controller->index();
