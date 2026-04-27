@@ -4,65 +4,77 @@ if (!defined('APP_CONTEXT')) {
     define('APP_CONTEXT', true);
 }
 
-// Si $student n'est pas définie par le contrôleur, essayer de la récupérer
-if (!isset($student) || !$student) {
-    // Vérifier qu'on a un ID d'étudiant en session
-    if (!isset($_SESSION['drawn_student_id'])) {
-        $_SESSION['error'] = "Aucun étudiant sélectionné";
-        header('Location: index.php');
-        exit;
-    }
-    
-    // Récupérer la connexion BDD si pas déjà disponible
-    if (!isset($bdd) || !$bdd) {
-        // Essayer de récupérer la connexion depuis les globals
-        if (isset($GLOBALS['bdd'])) {
-            $bdd = $GLOBALS['bdd'];
-        } else {
-            // Créer une nouvelle connexion
-            try {
-                if (!defined('DB_HOST')) {
-                    require_once __DIR__ . '/_config.php';
-                }
-                $bdd = new PDO(
-                    'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4', 
-                    DB_USER, 
-                    DB_PWD, 
-                    array(
-                        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-                    )
-                );
-            } catch(PDOException $e) {
-                $_SESSION['error'] = "Erreur de connexion à la base de données";
-                header('Location: index.php');
-                exit;
-            }
-        }
-    }
-    
-    // Récupérer l'étudiant
-    try {
-        if (!class_exists('StudentR')) {
-            require_once __DIR__ . '/models/StudentR.php';
-        }
-        if (!class_exists('Student')) {
-            require_once __DIR__ . '/models/Student.php';
-        }
-        
-        $studentR = new StudentR($bdd);
-        $student = $studentR->getStudentById($_SESSION['drawn_student_id']);
-        
-        if (!$student) {
-            $_SESSION['error'] = "Étudiant introuvable";
-            unset($_SESSION['drawn_student_id']);
+// Si $students n'est pas définie par le contrôleur, essayer de la récupérer
+if (!isset($students) || empty($students)) {
+    if (isset($student) && $student) {
+        $students = [$student];
+    } else {
+        // Vérifier qu'on a un ID d'étudiant en session
+        if (!isset($_SESSION['drawn_student_ids']) && !isset($_SESSION['drawn_student_id'])) {
+            $_SESSION['error'] = "Aucun étudiant sélectionné";
             header('Location: index.php');
             exit;
         }
-    } catch(Exception $e) {
-        $_SESSION['error'] = "Erreur lors de la récupération de l'étudiant : " . $e->getMessage();
-        header('Location: index.php');
-        exit;
+        
+        $drawnIds = $_SESSION['drawn_student_ids'] ?? [$_SESSION['drawn_student_id']];
+        
+        // Récupérer la connexion BDD si pas déjà disponible
+        if (!isset($bdd) || !$bdd) {
+            // Essayer de récupérer la connexion depuis les globals
+            if (isset($GLOBALS['bdd'])) {
+                $bdd = $GLOBALS['bdd'];
+            } else {
+                // Créer une nouvelle connexion
+                try {
+                    if (!defined('DB_HOST')) {
+                        require_once dirname(__DIR__) . '/_config.php';
+                    }
+                    $bdd = new PDO(
+                        'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4', 
+                        DB_USER, 
+                        DB_PWD, 
+                        array(
+                            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+                        )
+                    );
+                } catch(PDOException $e) {
+                    $_SESSION['error'] = "Erreur de connexion à la base de données";
+                    header('Location: index.php');
+                    exit;
+                }
+            }
+        }
+        
+        // Récupérer les étudiants
+        try {
+            if (!class_exists('StudentR')) {
+                require_once dirname(__DIR__) . '/models/StudentR.php';
+            }
+            if (!class_exists('Student')) {
+                require_once dirname(__DIR__) . '/models/Student.php';
+            }
+            
+            $studentR = new StudentR($bdd);
+            $students = [];
+            foreach ($drawnIds as $id) {
+                $s = $studentR->getStudentById($id);
+                if ($s) {
+                    $students[] = $s;
+                }
+            }
+            
+            if (empty($students)) {
+                $_SESSION['error'] = "Étudiant(s) introuvable(s)";
+                unset($_SESSION['drawn_student_id'], $_SESSION['drawn_student_ids']);
+                header('Location: index.php');
+                exit;
+            }
+        } catch(Exception $e) {
+            $_SESSION['error'] = "Erreur lors de la récupération des étudiants : " . $e->getMessage();
+            header('Location: index.php');
+            exit;
+        }
     }
 }
 ?>
@@ -272,13 +284,10 @@ if (!isset($student) || !$student) {
         
         <div class="content">
             <div class="drawn-student">
-                <?php if (isset($_SESSION['group_draw_total']) && $_SESSION['group_draw_total'] > 1): ?>
-                    <div style="background: rgba(255,255,255,0.2); display: inline-block; padding: 5px 15px; border-radius: 20px; font-weight: bold; margin-bottom: 10px;">
-                        👥 Tirage de groupe : <?= $_SESSION['group_draw_current'] ?> / <?= $_SESSION['group_draw_total'] ?>
-                    </div>
-                <?php endif; ?>
-                <h2>Étudiant tiré au sort</h2>
-                <h1><?= htmlspecialchars($student->getFullName()) ?></h1>
+                <h2>Étudiant(s) tiré(s) au sort</h2>
+                <?php foreach ($students as $s): ?>
+                    <h1><?= htmlspecialchars($s->getFullName()) ?></h1>
+                <?php endforeach; ?>
             </div>
 
             <?php if (isset($_SESSION['error'])): ?>
@@ -293,12 +302,12 @@ if (!isset($student) || !$student) {
                 
                 <div class="note-input-container">
                     <input type="number" name="note" class="note-input" 
-                           min="0" max="20" step="0.5" placeholder="0" required autofocus>
+                           min="0" max="20" step="0.5" placeholder="0" autofocus>
                     <span class="note-label">/20</span>
                 </div>
                 
                 <div class="note-range">
-                    Note comprise entre 0 et 20 (par demi-points)
+                    Note comprise entre 0 et 20 (par demi-points). Laisser vide pour passer sans noter.
                 </div>
                 
                 <div class="actions">
@@ -306,7 +315,7 @@ if (!isset($student) || !$student) {
                         Valider la note
                     </button>
                     <a href="index.php?action=skipStudent" class="btn btn-secondary">
-                        Passer sans noter
+                        Tout passer sans noter
                     </a>
                 </div>
             </form>
@@ -327,24 +336,31 @@ if (!isset($student) || !$student) {
             }
 
             // Validation en temps réel
-            noteInput.addEventListener('input', function() {
-                const value = parseFloat(this.value);
-                if (value < 0 || value > 20) {
-                    this.style.borderColor = '#FF416C';
-                    this.style.backgroundColor = '#ffebee';
-                } else {
-                    this.style.borderColor = '#4ECDC4';
-                    this.style.backgroundColor = '#f8f9fa';
-                }
-            });
+            if (noteInput) {
+                noteInput.addEventListener('input', function() {
+                    if (this.value === '') {
+                        this.style.borderColor = '#4ECDC4';
+                        this.style.backgroundColor = '#f8f9fa';
+                        return;
+                    }
+                    const value = parseFloat(this.value);
+                    if (value < 0 || value > 20) {
+                        this.style.borderColor = '#FF416C';
+                        this.style.backgroundColor = '#ffebee';
+                    } else {
+                        this.style.borderColor = '#4ECDC4';
+                        this.style.backgroundColor = '#f8f9fa';
+                    }
+                });
 
-            // Soumission avec Enter
-            noteInput.addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    this.form.submit();
-                }
-            });
+                // Soumission avec Enter
+                noteInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        this.form.submit();
+                    }
+                });
+            }
 
             // Animation d'entrée
             const container = document.querySelector('.container');

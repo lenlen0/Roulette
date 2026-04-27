@@ -121,41 +121,41 @@ class RouletteController {
                     }
                     
                     $drawnIds = [];
+                    $drawnStudents = [];
                     foreach ($keys as $key) {
-                        $drawnIds[] = $availableStudents[$key]->getId();
+                        $student = $availableStudents[$key];
+                        $drawnIds[] = $student->getId();
+                        $drawnStudents[] = $student;
                     }
                     
-                    $_SESSION['group_draw_ids'] = $drawnIds;
-                    $_SESSION['group_draw_total'] = count($drawnIds);
-                    $_SESSION['group_draw_current'] = 1;
-                    
-                    // Mettre le premier ID comme étudiant en cours
-                    $_SESSION['drawn_student_id'] = array_shift($_SESSION['group_draw_ids']);
-                    $drawnStudent = $this->StudentR->getStudentById($_SESSION['drawn_student_id']);
+                    $_SESSION['drawn_student_ids'] = $drawnIds;
+                    unset($_SESSION['drawn_student_id'], $_SESSION['group_draw_ids'], $_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
                 } else {
                     $randomIndex = random_int(0, count($availableStudents) - 1);
                     $drawnStudent = $availableStudents[$randomIndex];
-                    $_SESSION['drawn_student_id'] = $drawnStudent->getId();
-                    unset($_SESSION['group_draw_ids'], $_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
+                    $_SESSION['drawn_student_ids'] = [$drawnStudent->getId()];
+                    $drawnStudents = [$drawnStudent];
+                    unset($_SESSION['drawn_student_id'], $_SESSION['group_draw_ids'], $_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
                 }
             } else {
                 // Tirage simple
                 $randomIndex = random_int(0, count($availableStudents) - 1);
                 $drawnStudent = $availableStudents[$randomIndex];
-                $_SESSION['drawn_student_id'] = $drawnStudent->getId();
-                unset($_SESSION['group_draw_ids'], $_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
+                $_SESSION['drawn_student_ids'] = [$drawnStudent->getId()];
+                $drawnStudents = [$drawnStudent];
+                unset($_SESSION['drawn_student_id'], $_SESSION['group_draw_ids'], $_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
             }
             
-            // Passer l'étudiant à la vue
-            $student = $drawnStudent;
+            // Passer les étudiants à la vue
+            $students = $drawnStudents;
+
             
-            // Chercher le fichier de vue
             if (file_exists('views/note_view.php')) {
                 require_once 'views/note_view.php';
             } else if (file_exists('note_view.php')) {
                 require_once 'note_view.php';
             } else {
-                $this->renderNoteView($drawnStudent);
+                $this->renderNoteView($students);
             }
         } catch (Exception $e) {
             $_SESSION['error'] = "Erreur lors du tirage : " . $e->getMessage();
@@ -168,55 +168,79 @@ class RouletteController {
      * Attribue une note à l'étudiant tiré au sort
      */
     public function assignNote() {
-        if (!isset($_SESSION['drawn_student_id']) || !isset($_POST['note'])) {
+        if (!isset($_SESSION['drawn_student_ids']) && !isset($_SESSION['drawn_student_id'])) {
             $_SESSION['error'] = "Données manquantes pour l'attribution de note";
             header('Location: index.php');
             exit;
         }
         
+        $drawnIds = $_SESSION['drawn_student_ids'] ?? [$_SESSION['drawn_student_id']];
+        $notes = $_POST['notes'] ?? [];
+        
+        // Si une note globale est soumise, on l'applique à tout le groupe
+        if (isset($_POST['note']) && !empty($drawnIds)) {
+            foreach ($drawnIds as $id) {
+                $notes[$id] = $_POST['note'];
+            }
+        }
+        
         try {
-            // Récupérer l'étudiant depuis la base de données
-            $student = $this->StudentR->getStudentById($_SESSION['drawn_student_id']);
+            $hasError = false;
             
-            if (!$student) {
-                $_SESSION['error'] = "Étudiant introuvable";
-                unset($_SESSION['drawn_student_id']);
-                header('Location: index.php');
-                exit;
+            foreach ($drawnIds as $studentId) {
+                $student = $this->StudentR->getStudentById($studentId);
+                if (!$student) continue;
+                
+                $noteValue = $notes[$studentId] ?? '';
+                
+                if ($noteValue !== '') {
+                    $note = floatval($noteValue);
+                    if ($note < 0 || $note > 20) {
+                        $_SESSION['error'] = "La note doit être comprise entre 0 et 20 pour " . $student->getFullName();
+                        $hasError = true;
+                        break;
+                    }
+                }
             }
             
-            $note = floatval($_POST['note']);
-            
-            // Valider la note (entre 0 et 20)
-            if ($note < 0 || $note > 20) {
-                $_SESSION['error'] = "La note doit être comprise entre 0 et 20.";
+            if ($hasError) {
+                $students = [];
+                foreach ($drawnIds as $id) {
+                    $s = $this->StudentR->getStudentById($id);
+                    if ($s) $students[] = $s;
+                }
                 
-                // Repasser l'étudiant à la vue pour réaffichage
                 if (file_exists('views/note_view.php')) {
                     require_once 'views/note_view.php';
                 } else if (file_exists('note_view.php')) {
                     require_once 'note_view.php';
                 } else {
-                    $this->renderNoteView($student);
+                    $this->renderNoteView($students);
                 }
                 return;
             }
             
-            // Mettre à jour la base de données
-            $this->StudentR->updateStudentNote($student->getId(), $note);
-            
-            $_SESSION['message'] = "Note attribuée à " . $student->getFullName() . " : " . number_format($note, 1) . "/20";
-            unset($_SESSION['drawn_student_id']);
-            
-            // Si on est en tirage de groupe et qu'il reste des élèves
-            if (!empty($_SESSION['group_draw_ids'])) {
-                $_SESSION['group_draw_current']++;
-                header('Location: index.php?action=continueGroupDraw');
-                exit;
+            $messages = [];
+            foreach ($drawnIds as $studentId) {
+                $student = $this->StudentR->getStudentById($studentId);
+                if (!$student) continue;
+                
+                $noteValue = $notes[$studentId] ?? '';
+                
+                if ($noteValue !== '') {
+                    $note = floatval($noteValue);
+                    $this->StudentR->updateStudentNote($studentId, $note);
+                    $messages[] = $student->getFullName() . " (" . number_format($note, 1) . "/20)";
+                } else {
+                    $this->StudentR->markStudentAsPassed($studentId);
+                    $messages[] = $student->getFullName() . " (Passé)";
+                }
             }
             
-            // Sinon on a fini ou c'était un tirage simple
-            unset($_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
+            if (!empty($messages)) {
+                $_SESSION['message'] = "Enregistré : " . implode(', ', $messages);
+            }
+            unset($_SESSION['drawn_student_id'], $_SESSION['drawn_student_ids']);
             
             header('Location: index.php');
             exit;
@@ -231,43 +255,33 @@ class RouletteController {
      * Passe un étudiant sans lui attribuer de note
      */
     public function skipStudent() {
-        if (!isset($_SESSION['drawn_student_id'])) {
+        if (!isset($_SESSION['drawn_student_ids']) && !isset($_SESSION['drawn_student_id'])) {
             $_SESSION['error'] = "Aucun étudiant à passer";
             header('Location: index.php');
             exit;
         }
         
+        $drawnIds = $_SESSION['drawn_student_ids'] ?? [$_SESSION['drawn_student_id']];
+        
         try {
-            // Récupérer l'étudiant depuis la base de données
-            $student = $this->StudentR->getStudentById($_SESSION['drawn_student_id']);
-            
-            if (!$student) {
-                $_SESSION['error'] = "Étudiant introuvable";
-                unset($_SESSION['drawn_student_id']);
-                header('Location: index.php');
-                exit;
+            $messages = [];
+            foreach ($drawnIds as $studentId) {
+                $student = $this->StudentR->getStudentById($studentId);
+                if ($student) {
+                    $this->StudentR->markStudentAsPassed($studentId);
+                    $messages[] = $student->getFullName();
+                }
             }
             
-            // Marquer comme passé sans note
-            $this->StudentR->markStudentAsPassed($student->getId());
-            
-            $_SESSION['message'] = $student->getFullName() . " a été passé sans note.";
-            unset($_SESSION['drawn_student_id']);
-            
-            // Si on est en tirage de groupe et qu'il reste des élèves
-            if (!empty($_SESSION['group_draw_ids'])) {
-                $_SESSION['group_draw_current']++;
-                header('Location: index.php?action=continueGroupDraw');
-                exit;
+            if (!empty($messages)) {
+                $_SESSION['message'] = implode(', ', $messages) . " passé(s) sans note.";
             }
             
-            // Sinon on a fini ou c'était un tirage simple
-            unset($_SESSION['group_draw_total'], $_SESSION['group_draw_current']);
-            
+            unset($_SESSION['drawn_student_id'], $_SESSION['drawn_student_ids']);
             header('Location: index.php');
             exit;
         } catch (Exception $e) {
-            $_SESSION['error'] = "Erreur lors du passage de l'étudiant : " . $e->getMessage();
+            $_SESSION['error'] = "Erreur lors du passage : " . $e->getMessage();
             header('Location: index.php');
             exit;
         }
@@ -277,29 +291,9 @@ class RouletteController {
      * Continue le tirage au sort d'un groupe d'étudiants
      */
     public function continueGroupDraw() {
-        if (!isset($_SESSION['group_draw_ids']) || empty($_SESSION['group_draw_ids'])) {
-            $_SESSION['error'] = "Aucun tirage de groupe en cours.";
-            header('Location: index.php');
-            exit;
-        }
-        
-        // Prendre le prochain étudiant dans la liste
-        $_SESSION['drawn_student_id'] = array_shift($_SESSION['group_draw_ids']);
-        
-        try {
-            if (file_exists('views/note_view.php')) {
-                require_once 'views/note_view.php';
-            } else if (file_exists('note_view.php')) {
-                require_once 'note_view.php';
-            } else {
-                $student = $this->StudentR->getStudentById($_SESSION['drawn_student_id']);
-                $this->renderNoteView($student);
-            }
-        } catch (Exception $e) {
-            $_SESSION['error'] = "Erreur lors de la suite du tirage : " . $e->getMessage();
-            header('Location: index.php');
-            exit;
-        }
+        // Cette méthode n'est plus utilisée, le groupe est noté en même temps
+        header('Location: index.php');
+        exit;
     }
     
     /**
@@ -437,14 +431,21 @@ class RouletteController {
     /**
      * Rendu de la vue note si le fichier n'existe pas
      */
-    private function renderNoteView($student) {
-        // Si on a seulement l'ID, récupérer l'étudiant
-        if (!$student && isset($_SESSION['drawn_student_id'])) {
-            $student = $this->StudentR->getStudentById($_SESSION['drawn_student_id']);
+    private function renderNoteView($students) {
+        if (!is_array($students)) {
+            $students = [$students];
         }
         
-        if (!$student) {
-            $_SESSION['error'] = "Erreur: étudiant introuvable";
+        // Si vide, essayer de récupérer
+        if (empty($students) && isset($_SESSION['drawn_student_ids'])) {
+            foreach ($_SESSION['drawn_student_ids'] as $id) {
+                $s = $this->StudentR->getStudentById($id);
+                if ($s) $students[] = $s;
+            }
+        }
+        
+        if (empty($students)) {
+            $_SESSION['error'] = "Erreur: étudiant(s) introuvable(s)";
             header('Location: index.php');
             exit;
         }
@@ -469,7 +470,9 @@ class RouletteController {
             <h1>🎲 Attribution de Note</h1>
             
             <div class="student-name">
-                🎉 <?= htmlspecialchars($student->getFullName()) ?>
+                <?php foreach ($students as $s): ?>
+                    🎉 <?= htmlspecialchars($s->getFullName()) ?><br>
+                <?php endforeach; ?>
             </div>
 
             <?php if (isset($_SESSION['error'])): ?>
@@ -478,13 +481,13 @@ class RouletteController {
             <?php endif; ?>
 
             <form method="post" action="index.php?action=assignNote">
-                <h3>📝 Attribuer une note</h3>
+                <h3>📝 Attribuer une note (globale)</h3>
                 <input type="number" name="note" class="note-input" 
-                       min="0" max="20" step="0.5" placeholder="0" required autofocus>
+                       min="0" max="20" step="0.5" placeholder="0" autofocus>
                 <span>/20</span><br><br>
                 
                 <button type="submit" class="btn btn-primary">✅ Valider la note</button>
-                <a href="index.php?action=skipStudent" class="btn btn-secondary">⭐ Passer sans noter</a>
+                <a href="index.php?action=skipStudent" class="btn btn-secondary">⭐ Tout passer sans noter</a>
             </form>
 
             <p><a href="index.php">← Retour à l'accueil</a></p>
